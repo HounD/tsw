@@ -17,8 +17,21 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#ifdef __GNUC__
+
+static __inline__ __attribute__((always_inline))
+long CAS(volatile long *const dest, const long exch, const long cmprnd) {
+	return __sync_val_compare_and_swap(dest, cmprnd, exch);
+}
+
+static __inline__ __attribute__((always_inline))
+long EXCH(volatile long *const dest, const long exch) {
+	return __sync_lock_test_and_set(dest, exch);
+}
+#endif //__GNUC__
+
 #include <assert.h>
-#include <Windows.h>
+//#include <Windows.h>
 
 //Ternary Synchronization Word 
 namespace tsw {
@@ -32,14 +45,15 @@ namespace tsw {
 	// Writer's FSM: N (empty) -> P (writing) -> D (filled)
 	// Reader's FSM: N (not yet started) -> P (processing) -> D (done with processing)	
 	template<DV d2, DV d1, DV d0> class W2R {
-	public:	enum { V = (9*d2) + (3*d1) + d0 };	
+		public:	enum { V = (9*d2) + (3*d1) + d0 };
 	};
 
 	//wait for readers to complete (DDN) && set writing started (NNP)
 	void wfrc(long volatile& x) {	
 		bool done = false;
 		do {		
-			switch (InterlockedCompareExchange(&x, W2R<N,N,P>::V, W2R<D,D,N>::V)) {
+			//InterlockedCompareExchange(&x, W2R<N,N,P>::V, W2R<D,D,N>::V)
+			switch (CAS(&x, W2R<N,N,P>::V, W2R<D,D,N>::V)) {
 				case W2R<D,D,N>::V: { done = true; break; };
 
 					//Wait for readers
@@ -60,7 +74,8 @@ namespace tsw {
 
 	//set writer complete (change NNP -> NND)
 	void swc(long volatile& x) {
-		switch (InterlockedExchange(&x, W2R<N,N,D>::V)) {
+		//InterlockedExchange(&x, W2R<N,N,D>::V)
+		switch (EXCH(&x, W2R<N,N,D>::V)) {
 			case W2R<N,N,P>::V: { break; };
 
 				//Oops.. smthng went wrong
@@ -70,7 +85,7 @@ namespace tsw {
 
 	template<unsigned k> void wfwc(long volatile& x) {
 		//Error here means missing template specialization.
-		T();
+		//T();
 	}
 
 	//wait for writer to complete (NND) && set reader 1 started (xPD)
@@ -83,7 +98,7 @@ namespace tsw {
 		long tst_x = W2R<N,N,D>::V;	
 
 		do {
-			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
+			switch (CAS(&x, new_x, tst_x)) {
 				case W2R<N,N,D>::V: { done = true; break; };			
 
 				case W2R<P,N,D>::V: { 
@@ -123,7 +138,7 @@ namespace tsw {
 		long tst_x = W2R<N,N,D>::V;	
 
 		do {
-			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
+			switch (CAS(&x, new_x, tst_x)) {
 				case W2R<N,N,D>::V: { done = true; break; };			
 
 				case W2R<N,P,D>::V: { 
@@ -155,7 +170,7 @@ namespace tsw {
 
 	template<unsigned k> void src(long volatile& x) {
 		//Error here means missing template specialization.
-		T();
+		//T();
 	}
 
 	//set reader 1 complete (xDN)
@@ -168,7 +183,7 @@ namespace tsw {
 		long tst_x = W2R<N,P,D>::V;	
 
 		do {
-			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
+			switch (CAS(&x, new_x, tst_x)) {
 				case W2R<N,P,D>::V: { done = true; break; };			
 
 				case W2R<P,P,D>::V: { 
@@ -208,7 +223,7 @@ namespace tsw {
 		long tst_x = W2R<P,N,D>::V;	
 
 		do {
-			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
+			switch (CAS(&x, new_x, tst_x)) {
 				case W2R<P,N,D>::V: { done = true; break; };			
 
 				case W2R<P,P,D>::V: { 
