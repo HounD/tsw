@@ -35,39 +35,54 @@ namespace tsw {
 	// Writer's FSM: N (empty) -> P (writing) -> D (filled)
 	// Reader's FSM: N (not yet started) -> P (processing) -> D (done with processing)	
 	template<DV d2, DV d1, DV d0> class W2R {
-		public:	enum { V = (9*d2) + (3*d1) + d0 };	
+	public:	enum { V = (9*d2) + (3*d1) + d0 };	
 	};	
 
-	//wait for readers to complete (DDN) && set writing started (NNP)
+	//wait for readers to complete (DDx) && set writing started (xxP)
 	void wfrc(long volatile& x) {
+		static unsigned s = 0;
+
 		bool done = false;
 
 		long new_x = W2R<N,N,P>::V;
-		long tst_x = W2R<D,D,N>::V;
+		long tst_x = W2R<N,N,N>::V;
 
-		do {		
+		do {			
 			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
-				case W2R<N,N,P>::V: { done = true; break; };
+				case W2R<N,N,P>::V: { done = true; break; };				
 
-				case W2R<D,D,N>::V: {
-					new_x = W2R<N,N,P>::V;
+				case W2R<D,D,N>::V: { 
+					new_x = W2R<N,N,N>::V;
 					tst_x = W2R<D,D,N>::V;
-					break; 
-				};
+					break;
+				}
 
-				//Wait for readers
-				case W2R<P,D,N>::V: { break; };
-				case W2R<N,D,N>::V: { break; };
+				case W2R<D,D,D>::V: { 
+					new_x = W2R<N,N,N>::V;
+					tst_x = W2R<D,D,D>::V;
+					break;
+				}
 
-				case W2R<D,P,N>::V: { break; };
-				case W2R<D,N,N>::V: { break; };
+				case W2R<N,N,N>::V: {
+					new_x = W2R<N,N,P>::V;
+					tst_x = W2R<N,N,N>::V;
+					break;
+				}								
 
-				case W2R<P,P,N>::V: { break; };
-				case W2R<N,N,N>::V: { break; };
+				//Wait for readers				
+				case W2R<N,N,D>::V: { break; };				
+
+				case W2R<P,D,D>::V: { break; };
+				case W2R<N,D,D>::V: { break; };
+
+				case W2R<D,P,D>::V: { break; };
+				case W2R<D,N,D>::V: { break; };
+
+				case W2R<P,P,D>::V: { break; };				
 
 				//Oops.. smthng went wrong
 				default: { assert(false); };
-			}
+			}			
 		} while (!done);
 	}
 
@@ -86,20 +101,20 @@ namespace tsw {
 		T();
 	}
 
-	//wait for writer to complete (NND) && set reader 1 started (xPD)
+	//wait for writer to complete (xxD) && set reader 1 started (xPD)
 	template<> void wfwc<1>(long volatile& x) {		
+		static unsigned s = 0;
+
 		bool done = false;		
 
 		long new_x = W2R<N,P,D>::V;
 		long tst_x = W2R<N,N,D>::V;	
 
-		do {						
-			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
-				case W2R<N,N,P>::V: { break; }; //Not written yet, waiting
-				case W2R<D,D,N>::V: { break; }; //Not written yet, waiting				
-
+		do {			
+			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {				
+				case W2R<N,P,D>::V: { done = true; break; };
 				case W2R<P,P,D>::V: { done = true; break; }; 
-				case W2R<N,P,D>::V: { done = true; break; }; 				
+				case W2R<D,P,D>::V: { done = true; break; }; 				
 
 				case W2R<N,N,D>::V: {
 					new_x = W2R<N,P,D>::V;
@@ -116,30 +131,36 @@ namespace tsw {
 				case W2R<D,N,D>::V: {
 					new_x = W2R<D,P,D>::V;
 					tst_x = W2R<D,N,D>::V;
-					break; 
-				};				
+					break;
+				}				
+
+				case W2R<N,N,N>::V: { break; };
+				case W2R<D,D,D>::V: { break; };
+
+				case W2R<N,N,P>::V: { break; };								
+
+				case W2R<D,D,N>::V: { break; };
 
 				//Oops.. smthng went wrong
 				default: { assert(false); };
 			}			
-
 		} while (!done);
 	}
 
 	//wait for writer to complete (NND) && set reader 2 started (PxD)
 	template<> void wfwc<2>(long volatile& x) {
+		static unsigned s = 0;
+
 		bool done = false;		
 
 		long new_x = W2R<P,N,D>::V;
 		long tst_x = W2R<N,N,D>::V;	
 
-		do {
+		do {			
 			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
-				case W2R<N,N,P>::V: { break; }; //Not written yet, waiting
-				case W2R<D,D,P>::V: { break; }; //Not written yet, waiting
-
+				case W2R<P,N,D>::V: { done = true; break; };
 				case W2R<P,P,D>::V: { done = true; break; }; 
-				case W2R<P,N,D>::V: { done = true; break; }; 				
+				case W2R<P,D,D>::V: { done = true; break; }; 				
 
 				case W2R<N,N,D>::V: {
 					new_x = W2R<P,N,D>::V;
@@ -156,13 +177,19 @@ namespace tsw {
 				case W2R<N,D,D>::V: {
 					new_x = W2R<P,D,D>::V;
 					tst_x = W2R<N,D,D>::V;
-					break; 
-				};
+					break;
+				}				
+
+				case W2R<N,N,N>::V: { break; };
+				case W2R<D,D,D>::V: { break; };
+
+				case W2R<N,N,P>::V: { break; };
+
+				case W2R<D,D,N>::V: { break; };
 
 				//Oops.. smthng went wrong
 				default: { assert(false); };				
 			}			
-
 		} while (!done);
 	}
 
@@ -171,70 +198,81 @@ namespace tsw {
 		T();
 	}
 
-	//set reader 1 complete (xDN)
+	//set reader 1 complete (xDD)
 	template<> void src<1>(long volatile& x) {
+		static unsigned s = 0;
+
 		bool done = false;		
 
-		long new_x = W2R<N,D,N>::V;
+		long new_x = W2R<N,D,D>::V;
 		long tst_x = W2R<N,P,D>::V;	
 
-		do {
+		do {			
 			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
-				case W2R<N,P,D>::V: { break; };
+				case W2R<N,D,D>::V: { done = true; break; };
+				case W2R<P,D,D>::V: { done = true; break; }; 
+				case W2R<D,D,D>::V: { done = true; break; }; 
 
-				case W2R<P,D,N>::V: { done = true; break; }; 
-				case W2R<D,D,N>::V: { done = true; break; }; 
-
+				case W2R<N,P,D>::V: { 					
+					new_x = W2R<N,D,D>::V;
+					tst_x = W2R<N,P,D>::V;
+					break; 
+				};
 
 				case W2R<P,P,D>::V: { 					
-					new_x = W2R<P,D,N>::V;
+					new_x = W2R<P,D,D>::V;
 					tst_x = W2R<P,P,D>::V;
 					break; 
 				};
 
-				case W2R<D,P,N>::V: { 
-					new_x = W2R<D,D,N>::V;
-					tst_x = W2R<D,P,N>::V;
-					break; 
-				};
-
-					//Oops.. smthng went wrong
-				default: { assert(false); };
-			}			
-
-		} while (!done);	
-	}
-
-	//set reader 2 complete (DxN)
-	template<> void src<2>(long volatile& x) {		
-		bool done = false;		
-
-		long new_x = W2R<D,N,N>::V;
-		long tst_x = W2R<P,N,D>::V;	
-
-		do {
-			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
-				case W2R<P,N,D>::V: { break; };
-
-				case W2R<D,P,N>::V: { done = true; break; }; 
-				case W2R<D,D,N>::V: { done = true; break; };				
-
-				case W2R<P,P,D>::V: {
-					new_x = W2R<D,P,N>::V;
-					tst_x = W2R<P,P,D>::V;
-					break; 
-				};
-
-				case W2R<P,D,N>::V: {
-					new_x = W2R<D,D,N>::V;
-					tst_x = W2R<P,D,N>::V;
+				case W2R<D,P,D>::V: { 
+					new_x = W2R<D,D,D>::V;
+					tst_x = W2R<D,P,D>::V;
 					break; 
 				};
 
 				//Oops.. smthng went wrong
 				default: { assert(false); };
 			}			
+		} while (!done);	
+	}
 
+	//set reader 2 complete (DxN)
+	template<> void src<2>(long volatile& x) {	
+		static unsigned s = 0;
+
+		bool done = false;		
+
+		long new_x = W2R<D,N,D>::V;
+		long tst_x = W2R<P,N,D>::V;	
+
+		do {			
+			switch (InterlockedCompareExchange(&x, new_x, tst_x)) {
+				case W2R<D,N,D>::V: { done = true; break; };
+				case W2R<D,P,D>::V: { done = true; break; }; 
+				case W2R<D,D,D>::V: { done = true; break; }; 
+
+				case W2R<P,N,D>::V: { 					
+					new_x = W2R<D,N,D>::V;
+					tst_x = W2R<P,N,D>::V;
+					break; 
+									};
+
+				case W2R<P,P,D>::V: { 					
+					new_x = W2R<D,P,D>::V;
+					tst_x = W2R<P,P,D>::V;
+					break; 
+									};
+
+				case W2R<P,D,D>::V: { 
+					new_x = W2R<D,D,D>::V;
+					tst_x = W2R<P,D,D>::V;
+					break; 
+									};
+
+				//Oops.. smthng went wrong
+				default: { assert(false); };
+			}			
 		} while (!done);	
 	}
 }
